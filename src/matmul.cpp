@@ -28,29 +28,31 @@
 #include "device_picker.hpp"
 
 std::string kernelsource = "__kernel void mmul(                                                    \n" \
-"   const int N,                                                        \n" \
 "   const int M,                                                        \n" \
 "   const int P,                                                        \n" \
+"   const int N,                                                        \n" \
 "   __global float* A,                                                  \n" \
 "   __global float* B,                                                  \n" \
 "   __global float* C)                                                  \n" \
 "{                                                                      \n" \
-"    int i = get_global_id(0);                                          \n" \
-"    int j = get_global_id(1);                                          \n" \
 "    int k;                                                             \n" \
-"    float tmp;                                                         \n" \
-"    if ((i < N) && (j < M)) {                                          \n" \
-"        tmp = 0.0;                                                     \n" \
-"        for (k = 0; k < P; k++)                                     \n" \
-"            C[i*M + j] += A[i*P + k] * B[k*M + j];                            \n" \
-"    }                                                                  \n" \
+"        int i = get_global_id(0);                                      \n" \
+"        int j = get_global_id(1);                                      \n" \
+"        if (i<M && j<N) {                                              \n" \
+"                float tmp = 0.0f;                                      \n" \
+"                for (k = 0; k < P; k++){                               \n" \
+"                    tmp += A[i*P + k] * B[k*N + j];                    \n" \
+"                }                                                      \n" \
+"                C[i*N+j] = tmp;                                        \n" \
+"        }                                                              \n" \
 "}                                                                      \n" \
 "\n";
 
 int main(int argc, char *argv[])
 {
-
-    int N;                  // A[N][N], B[N][N], C[N][N]
+    int M=10000;
+    int P=300;
+    int N=4000;                  // A[N][N], B[N][N], C[N][N]
     int size;               // Number of elements in each matrix
 
 
@@ -58,13 +60,12 @@ int main(int argc, char *argv[])
     double run_time;        // Timing
     util::Timer timer;      // Timing
 
-    N    = ORDER;
-    size = N * N;
+    size = M * N;
 
-    std::vector<float> h_A(size); // Host memory for Matrix A
-    std::vector<float> h_B(size); // Host memory for Matrix B
+    std::vector<float> h_A(M*P); // Host memory for Matrix A
+    std::vector<float> h_B(P*N); // Host memory for Matrix B
     std::vector<float> h_C(size); // Host memory for Matrix C
-
+    std::vector<float> h_seq(size); // memory for seq results
     cl::Buffer d_a, d_b, d_c;   // Matrices in device memory
 
 //--------------------------------------------------------------------------------
@@ -104,21 +105,20 @@ int main(int argc, char *argv[])
 //--------------------------------------------------------------------------------
 
 
-        initmat(N, h_A, h_B, h_C);
+        initmat(M,P,N, h_A, h_B, h_seq,true);
 
         timer.reset();
 
         printf("\n===== Sequential, matrix mult (dot prod), order %d on host CPU ======\n",N);
         for(int i = 0; i < COUNT; i++)
         {
-            zero_mat(N, h_C);
+            zero_mat(M,N, h_seq);
 
             start_time = static_cast<double>(timer.getTimeMilliseconds()) / 1000.0;
 
-            seq_mat_mul_sdot(N, h_A, h_B, h_C);
-
+            seq_mat_mul_sdot(M,P,N, h_A, h_B, h_seq);
             run_time  = (static_cast<double>(timer.getTimeMilliseconds()) / 1000.0) - start_time;
-            results(N, h_C, run_time);
+            results(M,P,N, h_seq, run_time);
         }
 
 //--------------------------------------------------------------------------------
@@ -126,7 +126,7 @@ int main(int argc, char *argv[])
 //--------------------------------------------------------------------------------
 
         //  Reset A, B and C matrices (just to play it safe)
-        initmat(N, h_A, h_B, h_C);
+        initmat(M,P,N, h_A, h_B, h_C,false);
 
         d_a = cl::Buffer(context, h_A.begin(), h_A.end(), true);
 
@@ -137,6 +137,7 @@ int main(int argc, char *argv[])
 //--------------------------------------------------------------------------------
 // OpenCL matrix multiplication ... Naive
 //--------------------------------------------------------------------------------
+
 
         timer.reset();
 
@@ -151,7 +152,7 @@ int main(int argc, char *argv[])
         // Do the multiplication COUNT times
         for (int i = 0; i < COUNT; i++)
         {
-            zero_mat(N, h_C);
+            zero_mat(M,N, h_C);
 
             start_time = static_cast<double>(timer.getTimeMilliseconds()) / 1000.0;
 
@@ -159,9 +160,12 @@ int main(int argc, char *argv[])
             // a dot product for each element of the product matrix.  The local work
             // group size is set to NULL ... so I'm telling the OpenCL runtime to
             // figure out a local work group size for me.
-            cl::NDRange global(N, N);
-            naive_mmul(cl::EnqueueArgs(queue, global),
-                    N,N,N, d_a, d_b, d_c);
+            cl::NDRange global(M,N);
+            //cl::NDRange local(M/2,N/2);
+            //cl::NDRange offset(M/2,N/2);
+            naive_mmul(
+                    cl::EnqueueArgs(queue,global),
+                    M,P,N, d_a, d_b, d_c);
 
             queue.finish();
 
@@ -169,10 +173,11 @@ int main(int argc, char *argv[])
 
             cl::copy(queue, d_c, h_C.begin(), h_C.end());
 
-            results(N, h_C, run_time);
+            results(M,P,N, h_C, run_time);
 
         } // end for loop
 
+        error(M, N, h_seq,h_C);
     } catch (cl::Error err)
     {
         std::cout << "Exception\n";

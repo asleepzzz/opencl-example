@@ -24,19 +24,16 @@
 //
 //------------------------------------------------------------------------------
 
-void seq_mat_mul_sdot(int N, std::vector<float>& A, std::vector<float>& B, std::vector<float>& C)
+void seq_mat_mul_sdot(int M,int P,int N, std::vector<float>& A, std::vector<float>& B, std::vector<float>& C)
 {
     int i, j, k;
     float tmp;
 
-    for (i = 0; i < N; i++) {
+    for (i = 0; i < M; i++) {
         for (j = 0; j < N; j++) {
-            tmp = 0.0f;
-            for (k = 0; k < N; k++) {
-                /* C(i,j) = sum(over k) A(i,k) * B(k,j) */
-                tmp += A[i*N+k] * B[k*N+j];
+            for (k = 0; k < P; k++) {
+               C[i*N+j] += A[i*P+k] * B[k*N+j];
             }
-            C[i*N+j] = tmp;
         }
     }
 }
@@ -46,21 +43,22 @@ void seq_mat_mul_sdot(int N, std::vector<float>& A, std::vector<float>& B, std::
 //  Function to initialize the input matrices A and B
 //
 //------------------------------------------------------------------------------
-void initmat(int N, std::vector<float>& A, std::vector<float>& B, std::vector<float>& C)
+void initmat(int M ,int P,int N, std::vector<float>& A, std::vector<float>& B, std::vector<float>& C, bool isFirst)
 {
     int i, j;
 
     /* Initialize matrices */
 
-	for (i = 0; i < N; i++)
-		for (j = 0; j < N; j++)
-			A[i*N+j] = AVAL;
+        if (isFirst) {
+	for (i = 0; i < M; i++)
+		for (j = 0; j < P; j++)
+			A[i*P+j] = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
 
-	for (i = 0; i < N; i++)
+	for (i = 0; i < P; i++)
 		for (j = 0; j < N; j++)
-			B[i*N+j] = BVAL;
-
-	for (i = 0; i < N; i++)
+			B[i*N+j] = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+        }
+	for (i = 0; i < M; i++)
 		for (j = 0; j < N; j++)
 			C[i*N+j] = 0.0f;
 }
@@ -70,11 +68,11 @@ void initmat(int N, std::vector<float>& A, std::vector<float>& B, std::vector<fl
 //  Function to set a matrix to zero
 //
 //------------------------------------------------------------------------------
-void zero_mat (int N, std::vector<float>& C)
+void zero_mat (int M,int N, std::vector<float>& C)
 {
     int i, j;
 
-	for (i = 0; i < N; i++)
+	for (i = 0; i < M; i++)
 		for (j = 0; j < N; j++)
 			C[i*N+j] = 0.0f;
 }
@@ -98,19 +96,23 @@ void trans(int N, std::vector<float>& B, std::vector<float>& Btrans)
 //  Function to compute errors of the product matrix
 //
 //------------------------------------------------------------------------------
-float error(int N, std::vector<float>& C)
+float error(int M,int N, std::vector<float>& C, std::vector<float>& product)
 {
    int i,j;
    float cval, errsq, err;
-   cval = (float) N * AVAL * BVAL;
    errsq = 0.0f;
 
-    for (i = 0; i < N; i++) {
+    for (i = 0; i < M; i++) {
         for (j = 0; j < N; j++) {
-            err = C[i*N+j] - cval;
+            err = C[i*N+j] -product[i*N+j];
             errsq += err * err;
         }
     }
+ 
+    if (std::isnan(errsq) || errsq > TOL)
+        printf("\n Errors in multiplication: %f\n",errsq);
+    else
+        printf("\n ============ok============\n");
     return errsq;
 }
 
@@ -119,16 +121,12 @@ float error(int N, std::vector<float>& C)
 //  Function to analyze and output results
 //
 //------------------------------------------------------------------------------
-void results(int N, std::vector<float>& C, double run_time)
+void results(int M,int P,int N, std::vector<float>& C, double run_time)
 {
 
     float mflops;
     float errsq;
-    
-    mflops = 2.0 * N * N * N/(1000000.0f * run_time);
-    printf(" %.2f seconds at %.1f MFLOPS \n",  run_time,mflops);
-    errsq = error(N, C);
-    if (std::isnan(errsq) || errsq > TOL)
-           printf("\n Errors in multiplication: %f\n",errsq);
-}
 
+    mflops = 2.0 * M * P * N/(1000000.0f * run_time);
+    printf(" %.2f seconds at %.1f MFLOPS \n",  run_time,mflops);
+}
