@@ -29,9 +29,9 @@
 
 int main(int argc, char *argv[])
 {
-    int M=10000;
-    int P=300;
-    int N=4000;                  // A[N][N], B[N][N], C[N][N]
+    int M=800;
+    int P=3200;
+    int N=1600;                  // A[N][N], B[N][N], C[N][N]
     int size;               // Number of elements in each matrix
 
     int blockSize = 16;
@@ -113,7 +113,6 @@ int main(int argc, char *argv[])
         d_b = cl::Buffer(context, h_B.begin(), h_B.end(), true);
 
         d_c = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * size);
-
 //--------------------------------------------------------------------------------
 // OpenCL matrix multiplication ... Naive
 //--------------------------------------------------------------------------------
@@ -159,6 +158,57 @@ int main(int argc, char *argv[])
         } // end for loop
 
         error(M, N, h_seq,h_C);
+
+//--------------------------------------------------------------------------------
+// OpenCL matrix multiplication ... Sub block
+//--------------------------------------------------------------------------------
+
+        timer.reset();
+
+
+        //d_c = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * size);
+        cl::Buffer d_c2 = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * size);
+
+        // Create the compute program from the source buffer
+        cl::Program program2(context, util::loadProgram("matrixc_multiply_subblock.cl"), true);
+        //cl::Program program2(context, util::loadProgram("matrixc_multiply.cl"), true);
+        // Create the compute kernel from the program
+        cl::make_kernel<int,int,int, cl::Buffer, cl::Buffer, cl::Buffer> sub_block_mmul(program2, "mmul_sub_block");
+        //cl::make_kernel<int,int,int, cl::Buffer, cl::Buffer, cl::Buffer> sub_block_mmul(program2, "mmul");
+
+        printf("\n===== OpenCL,sub block matrix mult, C(i,j) per work item, order %d ======\n",N);
+
+        // Do the multiplication COUNT times
+        for (int i = 0; i < COUNT; i++)
+        {
+            zero_mat(M,N, h_C);
+
+            start_time = static_cast<double>(timer.getTimeMilliseconds()) / 1000.0;
+
+            // Execute the kernel over the entire range of C matrix elements ... computing
+            // a dot product for each element of the product matrix.  The local work
+            // group size is set to NULL ... so I'm telling the OpenCL runtime to
+            // figure out a local work group size for me.
+            cl::NDRange global(M,N);
+            cl::NDRange local(blockSize,blockSize);
+            //cl::NDRange offset(M/2,N/2);
+            sub_block_mmul(
+                    cl::EnqueueArgs(queue,global,local),
+                    M,P,N, d_a, d_b, d_c2);
+
+            queue.finish();
+
+            run_time  = (static_cast<double>(timer.getTimeMilliseconds()) / 1000.0) - start_time;
+
+            cl::copy(queue, d_c2, h_C.begin(), h_C.end());
+
+            results(M,P,N, h_C, run_time);
+
+        } // end for loop
+
+        error(M, N, h_seq,h_C);
+
+
     } catch (cl::Error err)
     {
         std::cout << "Exception\n";
